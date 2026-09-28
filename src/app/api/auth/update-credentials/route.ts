@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser, updateOwnerCredentials } from '@/lib/auth';
+import { getCurrentUser, updateOwnerCredentials, SESSION_COOKIE_NAME } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
     const { user } = await getCurrentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized. Please sign in again.' }, { status: 401 });
     }
 
     const body = await req.json();
@@ -20,12 +20,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: result.error || 'Failed to update credentials' }, { status: 400 });
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'Account credentials updated successfully.',
+      user: result.user,
     });
+
+    if (result.newToken) {
+      response.cookies.set({
+        name: SESSION_COOKIE_NAME,
+        value: result.newToken,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 30 * 24 * 60 * 60,
+      });
+    }
+
+    return response;
   } catch (err) {
     console.error('Update credentials error:', err);
-    return NextResponse.json({ error: 'Failed to update credentials' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to update credentials. Please try again.' }, { status: 500 });
   }
 }

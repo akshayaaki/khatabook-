@@ -111,8 +111,8 @@ export function SettingsView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           currentPassword,
-          newUsername: newUsername !== currentUser?.username ? newUsername.trim() : undefined,
-          newEmail: newEmail !== currentUser?.email ? newEmail.trim() : undefined,
+          newUsername: newUsername.trim() || undefined,
+          newEmail: newEmail.trim() || undefined,
           newPassword: newPassword ? newPassword.trim() : undefined,
         }),
       });
@@ -125,6 +125,11 @@ export function SettingsView() {
       }
 
       success('Account credentials updated successfully.');
+      if (data.user) {
+        setCurrentUser(data.user);
+        setNewUsername(data.user.username || '');
+        setNewEmail(data.user.email || '');
+      }
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
