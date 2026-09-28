@@ -1,0 +1,98 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  email        String?   @unique
+  passwordHash String
+  name         String?   @default("Owner")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String   @unique
+  deviceInfo String   @default("Unknown Device")
+  ipAddress  String?
+  userAgent  String?
+  lastActive DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+model Customer {
+  id           String        @id @default(cuid())
+  name         String
+  phone        String        @unique
+  email        String?
+  notes        String?
+  customFields Json?         @default("[]")
+  isArchived   Boolean       @default(false)
+  isDeleted    Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  transactions Transaction[]
+  deadlines    Deadline[]
+  Notification Notification[]
+
+  @@index([phone])
+  @@index([name])
+}
+
+model Transaction {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  type          String   // "GAVE" or "GOT"
+  amount        Float    // exact numeric stored
+  date          String   // YYYY-MM-DD
+  time          String   // HH:mm or HH:mm:ss 12hr/24hr
+  paymentMethod String   // "Cash" or "UPI"
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([date])
+}
+
+model Deadline {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  dueDate     String   // YYYY-MM-DD
+  notes       String?
+  isCompleted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([dueDate])
+}
+
+model Notification {
+  id         String    @id @default(cuid())
+  type       String    // "PAYMENT_DUE", "PAYMENT_OVERDUE", "PAYMENT_RECEIVED", "NEW_GIVEN", "SETTLED", "DAILY_SUMMARY", "WEEKLY_SUMMARY"
+  title      String
+  message    String
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  isRead     Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  @@index([isRead])
+  @@index([createdAt])
+}
