@@ -14,13 +14,11 @@
   - `₹5,000`, `₹50,000`, `₹1,00,000`, `₹10,00,000`.
 - **Timezone:** `Asia/Kolkata` with Indian date and time presentation (`26 Sep 2026 • 8:42 PM`).
 
-### 2. Single-Owner Authentication & 3-Device Session Control
-- **Initial Login Credentials:**
-  - **Username / Email:** `adminqwerty`
-  - **Password:** `qwerty`
+### 2. Supabase Authentication & Multi-Device Session Control
+- **Supabase Authentication:** Secure account registration and login backed by Supabase PostgreSQL.
 - **Max 3 Active Devices:** Automatic session tracking with device type, IP address, and last-active timestamps.
 - **"Logout All Other Devices":** One-click session invalidation across all other devices except your active one.
-- **Credential Management:** Update username, email, and password securely with bcrypt hashing.
+- **Credential Management:** Update username, email, and password securely with bcrypt hashing in Settings.
 
 ### 3. Core Financial Engine & Balance Calculations
 - **Transactions:** `YOU GAVE ₹` (Money lent) vs `YOU GOT ₹` (Repayment received).

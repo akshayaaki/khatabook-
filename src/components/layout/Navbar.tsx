@@ -286,7 +286,7 @@ export function Navbar({ onAddCustomerClick }: NavbarProps) {
             <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in fade-in-50 zoom-in-95">
               <div className="p-3.5 border-b border-slate-100 bg-slate-50/50">
                 <div className="font-bold text-xs text-slate-900">{currentUser?.name || 'Khata Owner'}</div>
-                <div className="text-[11px] text-slate-500">@{currentUser?.username || 'adminqwerty'}</div>
+                <div className="text-[11px] text-slate-500">@{currentUser?.username || 'owner'}</div>
                 <div className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
                   <ShieldCheck className="w-3 h-3" /> Single Owner Account
                 </div>

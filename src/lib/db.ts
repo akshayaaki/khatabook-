@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import bcrypt from 'bcryptjs';
 import { Customer, Transaction, Deadline, NotificationItem, DeviceSession } from './types';
 import { prisma } from './prisma';
 
@@ -37,17 +36,11 @@ function getStoragePaths(): { dir: string; file: string }[] {
 }
 
 function getInitialStore(): DBStore {
-  const defaultUser = process.env.ADMIN_USERNAME || process.env.OWNER_USERNAME || 'adminqwerty';
-  const defaultPass = process.env.ADMIN_PASSWORD || process.env.OWNER_PASSWORD || 'qwerty';
-
-  const salt = bcrypt.genSaltSync(10);
-  const passwordHash = bcrypt.hashSync(defaultPass, salt);
-
   const initialUser = {
     id: 'owner-main-1',
-    username: defaultUser,
-    email: 'owner@personalkhata.local',
-    passwordHash,
+    username: 'owner',
+    email: null,
+    passwordHash: '',
     name: 'Khata Owner',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -142,18 +135,20 @@ async function persistToSupabase(store: DBStore): Promise<void> {
   if (!process.env.DATABASE_URL) return;
 
   try {
-    // 1. Sync User
-    const existingUser = await prisma.user.findFirst();
-    if (!existingUser) {
-      await prisma.user.create({
-        data: {
-          id: store.user.id,
-          username: store.user.username,
-          email: store.user.email,
-          passwordHash: store.user.passwordHash,
-          name: store.user.name,
-        },
-      });
+    // 1. Sync User if has password hash
+    if (store.user && store.user.passwordHash) {
+      const existingUser = await prisma.user.findFirst();
+      if (!existingUser) {
+        await prisma.user.create({
+          data: {
+            id: store.user.id,
+            username: store.user.username,
+            email: store.user.email,
+            passwordHash: store.user.passwordHash,
+            name: store.user.name,
+          },
+        });
+      }
     }
 
     // 2. Sync Customers

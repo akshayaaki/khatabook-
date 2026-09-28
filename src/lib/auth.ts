@@ -94,7 +94,7 @@ export function parseDeviceName(userAgent?: string): string {
 }
 
 /**
- * Authenticates credentials against owner account (Supabase PostgreSQL + Memory fallback)
+ * Authenticates credentials against Supabase PostgreSQL
  */
 export async function authenticateOwner(
   usernameOrEmail: string,
@@ -113,15 +113,15 @@ export async function authenticateOwner(
     passwordHash: string;
     name?: string | null;
     createdAt?: string | Date;
-  } = store.user;
+  } | null = null;
 
-  // Check Supabase PostgreSQL if available
+  // 1. Query Supabase PostgreSQL
   try {
     const dbUser = await prisma.user.findFirst({
       where: {
         OR: [
-          { username: { equals: normalizedInput, mode: 'insensitive' } },
-          { email: { equals: normalizedInput, mode: 'insensitive' } },
+          { username: { equals: normalizedInput, mode: 'insensitive' as const } },
+          { email: { equals: normalizedInput, mode: 'insensitive' as const } },
         ],
       },
     });
@@ -135,44 +135,22 @@ export async function authenticateOwner(
         name: dbUser.name,
         createdAt: dbUser.createdAt.toISOString(),
       };
-    } else if (normalizedInput === 'admin' || normalizedInput === 'adminqwerty') {
-      // Create owner in Supabase if not yet created
-      const count = await prisma.user.count();
-      if (count === 0) {
-        const salt = bcrypt.genSaltSync(10);
-        const passwordHash = bcrypt.hashSync('qwerty', salt);
-        const created = await prisma.user.create({
-          data: {
-            username: 'adminqwerty',
-            email: 'owner@personalkhata.local',
-            passwordHash,
-            name: 'Khata Owner',
-          },
-        });
-        targetUser = {
-          id: created.id,
-          username: created.username,
-          email: created.email,
-          passwordHash: created.passwordHash,
-          name: created.name,
-          createdAt: created.createdAt.toISOString(),
-        };
-      }
     }
   } catch (err) {
-    console.warn('Supabase authentication check notice (using resilient fallback):', err);
+    console.warn('Supabase DB query error:', err);
   }
 
-  const matchesUsername = 
-    targetUser.username.toLowerCase() === normalizedInput ||
-    (normalizedInput === 'admin' && targetUser.username.toLowerCase().startsWith('admin')) ||
-    (process.env.ADMIN_USERNAME && process.env.ADMIN_USERNAME.toLowerCase() === normalizedInput) ||
-    (process.env.OWNER_USERNAME && process.env.OWNER_USERNAME.toLowerCase() === normalizedInput);
+  // 2. Check local store fallback if DB is not reachable
+  if (!targetUser && store.user && store.user.username) {
+    const matchesUser = store.user.username.toLowerCase() === normalizedInput;
+    const matchesEmail = store.user.email ? store.user.email.toLowerCase() === normalizedInput : false;
+    if (matchesUser || matchesEmail) {
+      targetUser = store.user;
+    }
+  }
 
-  const matchesEmail = targetUser.email ? targetUser.email.toLowerCase() === normalizedInput : false;
-
-  if (!matchesUsername && !matchesEmail) {
-    return { success: false, error: 'Invalid username or password' };
+  if (!targetUser) {
+    return { success: false, error: 'Invalid username/email or password' };
   }
 
   let passwordValid = false;
@@ -182,18 +160,8 @@ export async function authenticateOwner(
     passwordValid = false;
   }
 
-  // Safe fallback comparison for default credentials or environment override
   if (!passwordValid) {
-    const envPass = process.env.ADMIN_PASSWORD || process.env.OWNER_PASSWORD;
-    if (envPass && passwordPlain === envPass) {
-      passwordValid = true;
-    } else if (passwordPlain === 'qwerty' && (targetUser.username === 'adminqwerty' || normalizedInput === 'admin' || normalizedInput === 'adminqwerty')) {
-      passwordValid = true;
-    }
-  }
-
-  if (!passwordValid) {
-    return { success: false, error: 'Invalid username or password' };
+    return { success: false, error: 'Invalid username/email or password' };
   }
 
   // Update local cached store user
@@ -202,7 +170,7 @@ export async function authenticateOwner(
     username: targetUser.username,
     email: targetUser.email,
     passwordHash: targetUser.passwordHash,
-    name: targetUser.name || 'Khata Owner',
+    name: targetUser.name || 'Owner',
     createdAt: typeof targetUser.createdAt === 'string' ? targetUser.createdAt : new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -211,7 +179,7 @@ export async function authenticateOwner(
     userId: targetUser.id,
     username: targetUser.username,
     email: targetUser.email,
-    name: targetUser.name || 'Khata Owner',
+    name: targetUser.name || 'Owner',
     deviceInfo: deviceInfo || parseDeviceName(userAgent),
     createdAt: new Date().toISOString(),
     exp: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
@@ -268,10 +236,10 @@ export async function validateSession(token: string): Promise<{ valid: boolean; 
   if (decoded && decoded.userId) {
     const store = readStore();
     const user: OwnerUser = {
-      id: (decoded.userId as string) || store.user.id,
-      username: store.user?.username || (decoded.username as string) || 'adminqwerty',
+      id: (decoded.userId as string) || store.user?.id || 'owner-id',
+      username: store.user?.username || (decoded.username as string) || 'owner',
       email: store.user?.email ?? (decoded.email as string | null) ?? null,
-      name: store.user?.name || (decoded.name as string) || 'Khata Owner',
+      name: store.user?.name || (decoded.name as string) || 'Owner',
       createdAt: store.user?.createdAt || (decoded.createdAt as string) || new Date().toISOString(),
     };
 
@@ -290,7 +258,7 @@ export async function validateSession(token: string): Promise<{ valid: boolean; 
   // 2. Fallback to store lookup
   const store = readStore();
   const session = store.sessions.find((s) => s.token === token);
-  if (session) {
+  if (session && store.user) {
     session.lastActive = new Date().toISOString();
     writeStore(store);
 
@@ -367,7 +335,7 @@ export async function getActiveSessions(currentToken?: string): Promise<DeviceSe
   if (currentToken && !sessions.some(s => s.token === currentToken) && currentTokenValid) {
     sessions.unshift({
       id: `sess-${Date.now()}`,
-      userId: (currentTokenValid.userId as string) || store.user.id,
+      userId: (currentTokenValid.userId as string) || store.user?.id || 'owner',
       token: currentToken,
       deviceInfo: (currentTokenValid.deviceInfo as string) || 'Current Device',
       lastActive: new Date().toISOString(),
@@ -382,7 +350,7 @@ export async function getActiveSessions(currentToken?: string): Promise<DeviceSe
 }
 
 /**
- * Update owner credentials in Supabase PostgreSQL & Local Cache
+ * Update owner credentials in Supabase PostgreSQL
  */
 export async function updateOwnerCredentials(
   currentPassword: string,
@@ -391,36 +359,39 @@ export async function updateOwnerCredentials(
   newEmail?: string
 ): Promise<{ success: boolean; error?: string; newToken?: string; user?: OwnerUser }> {
   const store = readStore();
-  const user = store.user;
+  
+  // Find current user in DB or local store
+  let dbUser = null;
+  try {
+    dbUser = await prisma.user.findFirst();
+  } catch (err) {
+    console.warn('Supabase findFirst error:', err);
+  }
 
-  // Verify current password
+  const currentUser = dbUser || store.user;
+  if (!currentUser || !currentUser.passwordHash) {
+    return { success: false, error: 'No owner account found. Please register first.' };
+  }
+
+  // Verify current password with bcrypt
   let isMatch = false;
   try {
-    isMatch = bcrypt.compareSync(currentPassword, user.passwordHash);
+    isMatch = bcrypt.compareSync(currentPassword, currentUser.passwordHash);
   } catch {
     isMatch = false;
   }
 
   if (!isMatch) {
-    const envPass = process.env.ADMIN_PASSWORD || process.env.OWNER_PASSWORD;
-    if (envPass && currentPassword === envPass) {
-      isMatch = true;
-    } else if (currentPassword === 'qwerty') {
-      isMatch = true;
-    }
+    return { success: false, error: 'Current password is incorrect.' };
   }
 
-  if (!isMatch) {
-    return { success: false, error: 'Current password is incorrect' };
-  }
-
-  let finalUsername = user.username;
-  let finalEmail = user.email;
-  let finalPasswordHash = user.passwordHash;
+  let finalUsername = currentUser.username;
+  let finalEmail = currentUser.email;
+  let finalPasswordHash = currentUser.passwordHash;
 
   if (newUsername && newUsername.trim()) {
     if (newUsername.trim().length < 3) {
-      return { success: false, error: 'Username must be at least 3 characters long' };
+      return { success: false, error: 'Username must be at least 3 characters long.' };
     }
     finalUsername = newUsername.trim();
   }
@@ -430,26 +401,18 @@ export async function updateOwnerCredentials(
   }
 
   if (newPassword && newPassword.trim()) {
-    if (newPassword.trim().length < 5) {
-      return { success: false, error: 'New password must be at least 5 characters long' };
+    if (newPassword.trim().length < 6) {
+      return { success: false, error: 'New password must be at least 6 characters long.' };
     }
     const salt = bcrypt.genSaltSync(10);
     finalPasswordHash = bcrypt.hashSync(newPassword.trim(), salt);
   }
 
-  user.username = finalUsername;
-  user.email = finalEmail;
-  user.passwordHash = finalPasswordHash;
-  user.updatedAt = new Date().toISOString();
-  store.user = user;
-  writeStore(store);
-
   // Persist directly to Supabase PostgreSQL User table
   try {
-    const existingDbUser = await prisma.user.findFirst();
-    if (existingDbUser) {
+    if (dbUser) {
       await prisma.user.update({
-        where: { id: existingDbUser.id },
+        where: { id: dbUser.id },
         data: {
           username: finalUsername,
           email: finalEmail,
@@ -462,7 +425,7 @@ export async function updateOwnerCredentials(
           username: finalUsername,
           email: finalEmail,
           passwordHash: finalPasswordHash,
-          name: user.name || 'Khata Owner',
+          name: currentUser.name || 'Owner',
         },
       });
     }
@@ -470,23 +433,35 @@ export async function updateOwnerCredentials(
     console.warn('Supabase credential sync notice:', err);
   }
 
+  // Update store cache
+  store.user = {
+    id: currentUser.id,
+    username: finalUsername,
+    email: finalEmail,
+    passwordHash: finalPasswordHash,
+    name: currentUser.name || 'Owner',
+    createdAt: typeof currentUser.createdAt === 'string' ? currentUser.createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  writeStore(store);
+
   // Issue a fresh signed token with updated username/email
   const newToken = createSignedToken({
-    userId: user.id,
-    username: user.username,
-    email: user.email,
-    name: user.name,
+    userId: currentUser.id,
+    username: finalUsername,
+    email: finalEmail,
+    name: currentUser.name || 'Owner',
     deviceInfo: 'Owner Device',
     createdAt: new Date().toISOString(),
     exp: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
   });
 
   const updatedOwnerUser: OwnerUser = {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    name: user.name,
-    createdAt: user.createdAt,
+    id: currentUser.id,
+    username: finalUsername,
+    email: finalEmail,
+    name: currentUser.name || 'Owner',
+    createdAt: typeof currentUser.createdAt === 'string' ? currentUser.createdAt : new Date().toISOString(),
   };
 
   return { success: true, newToken, user: updatedOwnerUser };
