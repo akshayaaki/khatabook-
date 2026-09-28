@@ -16,9 +16,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!password || typeof password !== 'string' || password.trim().length < 6) {
+    if (!password || typeof password !== 'string' || password.trim().length < 5) {
       return NextResponse.json(
-        { error: 'Password must be at least 6 characters long.' },
+        { error: 'Password must be at least 5 characters long.' },
         { status: 400 }
       );
     }
@@ -129,11 +129,13 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    const isHttps = req.nextUrl?.protocol === 'https:' || req.headers.get('x-forwarded-proto') === 'https';
+
     response.cookies.set({
       name: SESSION_COOKIE_NAME,
       value: token,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isHttps,
       sameSite: 'lax',
       path: '/',
       maxAge: 30 * 24 * 60 * 60,

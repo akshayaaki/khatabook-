@@ -33,12 +33,14 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    const isHttps = req.nextUrl?.protocol === 'https:' || req.headers.get('x-forwarded-proto') === 'https';
+
     // Set secure HTTP-only session cookie (30 days expiry)
     response.cookies.set({
       name: SESSION_COOKIE_NAME,
       value: result.session.token,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isHttps,
       sameSite: 'lax',
       path: '/',
       maxAge: 30 * 24 * 60 * 60,

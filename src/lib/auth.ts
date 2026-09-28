@@ -135,22 +135,63 @@ export async function authenticateOwner(
         name: dbUser.name,
         createdAt: dbUser.createdAt.toISOString(),
       };
+    } else {
+      // If DB is completely empty, auto-create this first user
+      const count = await prisma.user.count();
+      if (count === 0) {
+        const isEmail = normalizedInput.includes('@');
+        const cleanUser = isEmail ? normalizedInput.split('@')[0] : normalizedInput;
+        const salt = bcrypt.genSaltSync(10);
+        const passwordHash = bcrypt.hashSync(passwordPlain, salt);
+        const created = await prisma.user.create({
+          data: {
+            username: cleanUser,
+            email: isEmail ? normalizedInput : null,
+            passwordHash,
+            name: 'Khata Owner',
+          },
+        });
+        targetUser = {
+          id: created.id,
+          username: created.username,
+          email: created.email,
+          passwordHash: created.passwordHash,
+          name: created.name,
+          createdAt: created.createdAt.toISOString(),
+        };
+      }
     }
   } catch (err) {
     console.warn('Supabase DB query error:', err);
   }
 
   // 2. Check local store fallback if DB is not reachable
-  if (!targetUser && store.user && store.user.username) {
-    const matchesUser = store.user.username.toLowerCase() === normalizedInput;
-    const matchesEmail = store.user.email ? store.user.email.toLowerCase() === normalizedInput : false;
-    if (matchesUser || matchesEmail) {
-      targetUser = store.user;
+  if (!targetUser) {
+    if (store.user && store.user.passwordHash) {
+      const matchesUser = store.user.username.toLowerCase() === normalizedInput;
+      const matchesEmail = store.user.email ? store.user.email.toLowerCase() === normalizedInput : false;
+      if (matchesUser || matchesEmail) {
+        targetUser = store.user;
+      }
+    } else {
+      // First-time local store initialization
+      const isEmail = normalizedInput.includes('@');
+      const cleanUser = isEmail ? normalizedInput.split('@')[0] : normalizedInput;
+      const salt = bcrypt.genSaltSync(10);
+      const passwordHash = bcrypt.hashSync(passwordPlain, salt);
+      targetUser = {
+        id: 'owner-main-1',
+        username: cleanUser,
+        email: isEmail ? normalizedInput : null,
+        passwordHash,
+        name: 'Khata Owner',
+        createdAt: new Date().toISOString(),
+      };
     }
   }
 
-  if (!targetUser) {
-    return { success: false, error: 'Invalid username/email or password' };
+  if (!targetUser || !targetUser.passwordHash) {
+    return { success: false, error: 'Account not found. Please click Create Account to register.' };
   }
 
   let passwordValid = false;
@@ -161,7 +202,7 @@ export async function authenticateOwner(
   }
 
   if (!passwordValid) {
-    return { success: false, error: 'Invalid username/email or password' };
+    return { success: false, error: 'Incorrect password. Please try again.' };
   }
 
   // Update local cached store user
@@ -170,7 +211,7 @@ export async function authenticateOwner(
     username: targetUser.username,
     email: targetUser.email,
     passwordHash: targetUser.passwordHash,
-    name: targetUser.name || 'Owner',
+    name: targetUser.name || 'Khata Owner',
     createdAt: typeof targetUser.createdAt === 'string' ? targetUser.createdAt : new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -179,7 +220,7 @@ export async function authenticateOwner(
     userId: targetUser.id,
     username: targetUser.username,
     email: targetUser.email,
-    name: targetUser.name || 'Owner',
+    name: targetUser.name || 'Khata Owner',
     deviceInfo: deviceInfo || parseDeviceName(userAgent),
     createdAt: new Date().toISOString(),
     exp: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
@@ -239,7 +280,7 @@ export async function validateSession(token: string): Promise<{ valid: boolean; 
       id: (decoded.userId as string) || store.user?.id || 'owner-id',
       username: store.user?.username || (decoded.username as string) || 'owner',
       email: store.user?.email ?? (decoded.email as string | null) ?? null,
-      name: store.user?.name || (decoded.name as string) || 'Owner',
+      name: store.user?.name || (decoded.name as string) || 'Khata Owner',
       createdAt: store.user?.createdAt || (decoded.createdAt as string) || new Date().toISOString(),
     };
 
@@ -360,7 +401,6 @@ export async function updateOwnerCredentials(
 ): Promise<{ success: boolean; error?: string; newToken?: string; user?: OwnerUser }> {
   const store = readStore();
   
-  // Find current user in DB or local store
   let dbUser = null;
   try {
     dbUser = await prisma.user.findFirst();
@@ -425,7 +465,7 @@ export async function updateOwnerCredentials(
           username: finalUsername,
           email: finalEmail,
           passwordHash: finalPasswordHash,
-          name: currentUser.name || 'Owner',
+          name: currentUser.name || 'Khata Owner',
         },
       });
     }
@@ -439,7 +479,7 @@ export async function updateOwnerCredentials(
     username: finalUsername,
     email: finalEmail,
     passwordHash: finalPasswordHash,
-    name: currentUser.name || 'Owner',
+    name: currentUser.name || 'Khata Owner',
     createdAt: typeof currentUser.createdAt === 'string' ? currentUser.createdAt : new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -450,7 +490,7 @@ export async function updateOwnerCredentials(
     userId: currentUser.id,
     username: finalUsername,
     email: finalEmail,
-    name: currentUser.name || 'Owner',
+    name: currentUser.name || 'Khata Owner',
     deviceInfo: 'Owner Device',
     createdAt: new Date().toISOString(),
     exp: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
@@ -460,7 +500,7 @@ export async function updateOwnerCredentials(
     id: currentUser.id,
     username: finalUsername,
     email: finalEmail,
-    name: currentUser.name || 'Owner',
+    name: currentUser.name || 'Khata Owner',
     createdAt: typeof currentUser.createdAt === 'string' ? currentUser.createdAt : new Date().toISOString(),
   };
 
