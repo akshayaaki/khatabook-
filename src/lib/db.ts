@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import bcrypt from 'bcryptjs';
 import { Customer, Transaction, Deadline, NotificationItem, DeviceSession } from './types';
+import { prisma } from './prisma';
 
 export interface DBStore {
   user: {
@@ -22,7 +23,7 @@ export interface DBStore {
 }
 
 // Global in-memory cache to survive across serverless function invocations
-const globalStore = globalThis as unknown as { __khata_store?: DBStore };
+const globalStore = globalThis as unknown as { __khata_store?: DBStore; __db_synced?: boolean };
 
 // Determine safe storage directory
 function getStoragePaths(): { dir: string; file: string }[] {
@@ -125,8 +126,88 @@ export function writeStore(store: DBStore): void {
   }
 
   if (!written) {
-    // In-memory fallback holds the data safely
     console.warn('Storage persistence to disk was skipped, retaining in-memory state.');
+  }
+
+  // Asynchronously mirror customer and user changes to Supabase PostgreSQL
+  persistToSupabase(store).catch((err) => {
+    console.warn('Supabase sync notice:', err?.message || err);
+  });
+}
+
+/**
+ * Sync in-memory store state with Supabase PostgreSQL
+ */
+async function persistToSupabase(store: DBStore): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+
+  try {
+    // 1. Sync User
+    const existingUser = await prisma.user.findFirst();
+    if (!existingUser) {
+      await prisma.user.create({
+        data: {
+          id: store.user.id,
+          username: store.user.username,
+          email: store.user.email,
+          passwordHash: store.user.passwordHash,
+          name: store.user.name,
+        },
+      });
+    }
+
+    // 2. Sync Customers
+    for (const c of store.customers) {
+      await prisma.customer.upsert({
+        where: { id: c.id },
+        update: {
+          name: c.name,
+          phone: c.phone,
+          email: c.email,
+          notes: c.notes,
+          customFields: c.customFields ? JSON.stringify(c.customFields) : undefined,
+          isArchived: c.isArchived,
+          isDeleted: c.isDeleted,
+        },
+        create: {
+          id: c.id,
+          name: c.name,
+          phone: c.phone,
+          email: c.email,
+          notes: c.notes,
+          customFields: c.customFields ? JSON.stringify(c.customFields) : undefined,
+          isArchived: c.isArchived,
+          isDeleted: c.isDeleted,
+        },
+      });
+    }
+
+    // 3. Sync Transactions
+    for (const t of store.transactions) {
+      await prisma.transaction.upsert({
+        where: { id: t.id },
+        update: {
+          type: t.type,
+          amount: t.amount,
+          date: t.date,
+          time: t.time,
+          paymentMethod: t.paymentMethod,
+          notes: t.notes,
+        },
+        create: {
+          id: t.id,
+          customerId: t.customerId,
+          type: t.type,
+          amount: t.amount,
+          date: t.date,
+          time: t.time,
+          paymentMethod: t.paymentMethod,
+          notes: t.notes,
+        },
+      });
+    }
+  } catch (err) {
+    console.warn('Background Supabase mirror notice:', err);
   }
 }
 

@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { readStore, writeStore } from './db';
+import { prisma } from './prisma';
 import { DeviceSession, OwnerUser } from './types';
 
 export const SESSION_COOKIE_NAME = 'pk_session_token';
@@ -93,7 +94,7 @@ export function parseDeviceName(userAgent?: string): string {
 }
 
 /**
- * Authenticates credentials against owner account
+ * Authenticates credentials against owner account (Supabase PostgreSQL + Memory fallback)
  */
 export async function authenticateOwner(
   usernameOrEmail: string,
@@ -103,16 +104,72 @@ export async function authenticateOwner(
   userAgent?: string
 ): Promise<{ success: boolean; session?: DeviceSession; error?: string }> {
   const store = readStore();
-  const user = store.user;
-
   const normalizedInput = usernameOrEmail.trim().toLowerCase();
+
+  let targetUser: {
+    id: string;
+    username: string;
+    email: string | null;
+    passwordHash: string;
+    name?: string | null;
+    createdAt?: string | Date;
+  } = store.user;
+
+  // Check Supabase PostgreSQL if available
+  try {
+    const dbUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: { equals: normalizedInput, mode: 'insensitive' } },
+          { email: { equals: normalizedInput, mode: 'insensitive' } },
+        ],
+      },
+    });
+
+    if (dbUser) {
+      targetUser = {
+        id: dbUser.id,
+        username: dbUser.username,
+        email: dbUser.email,
+        passwordHash: dbUser.passwordHash,
+        name: dbUser.name,
+        createdAt: dbUser.createdAt.toISOString(),
+      };
+    } else if (normalizedInput === 'admin' || normalizedInput === 'adminqwerty') {
+      // Create owner in Supabase if not yet created
+      const count = await prisma.user.count();
+      if (count === 0) {
+        const salt = bcrypt.genSaltSync(10);
+        const passwordHash = bcrypt.hashSync('qwerty', salt);
+        const created = await prisma.user.create({
+          data: {
+            username: 'adminqwerty',
+            email: 'owner@personalkhata.local',
+            passwordHash,
+            name: 'Khata Owner',
+          },
+        });
+        targetUser = {
+          id: created.id,
+          username: created.username,
+          email: created.email,
+          passwordHash: created.passwordHash,
+          name: created.name,
+          createdAt: created.createdAt.toISOString(),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Supabase authentication check notice (using resilient fallback):', err);
+  }
+
   const matchesUsername = 
-    user.username.toLowerCase() === normalizedInput ||
-    (normalizedInput === 'admin' && user.username.toLowerCase().startsWith('admin')) ||
+    targetUser.username.toLowerCase() === normalizedInput ||
+    (normalizedInput === 'admin' && targetUser.username.toLowerCase().startsWith('admin')) ||
     (process.env.ADMIN_USERNAME && process.env.ADMIN_USERNAME.toLowerCase() === normalizedInput) ||
     (process.env.OWNER_USERNAME && process.env.OWNER_USERNAME.toLowerCase() === normalizedInput);
 
-  const matchesEmail = user.email ? user.email.toLowerCase() === normalizedInput : false;
+  const matchesEmail = targetUser.email ? targetUser.email.toLowerCase() === normalizedInput : false;
 
   if (!matchesUsername && !matchesEmail) {
     return { success: false, error: 'Invalid username or password' };
@@ -120,7 +177,7 @@ export async function authenticateOwner(
 
   let passwordValid = false;
   try {
-    passwordValid = bcrypt.compareSync(passwordPlain, user.passwordHash);
+    passwordValid = bcrypt.compareSync(passwordPlain, targetUser.passwordHash);
   } catch {
     passwordValid = false;
   }
@@ -130,7 +187,7 @@ export async function authenticateOwner(
     const envPass = process.env.ADMIN_PASSWORD || process.env.OWNER_PASSWORD;
     if (envPass && passwordPlain === envPass) {
       passwordValid = true;
-    } else if (passwordPlain === 'qwerty' && (user.username === 'adminqwerty' || normalizedInput === 'admin' || normalizedInput === 'adminqwerty')) {
+    } else if (passwordPlain === 'qwerty' && (targetUser.username === 'adminqwerty' || normalizedInput === 'admin' || normalizedInput === 'adminqwerty')) {
       passwordValid = true;
     }
   }
@@ -139,11 +196,22 @@ export async function authenticateOwner(
     return { success: false, error: 'Invalid username or password' };
   }
 
+  // Update local cached store user
+  store.user = {
+    id: targetUser.id,
+    username: targetUser.username,
+    email: targetUser.email,
+    passwordHash: targetUser.passwordHash,
+    name: targetUser.name || 'Khata Owner',
+    createdAt: typeof targetUser.createdAt === 'string' ? targetUser.createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
   const tokenPayload = {
-    userId: user.id,
-    username: user.username,
-    email: user.email,
-    name: user.name,
+    userId: targetUser.id,
+    username: targetUser.username,
+    email: targetUser.email,
+    name: targetUser.name || 'Khata Owner',
     deviceInfo: deviceInfo || parseDeviceName(userAgent),
     createdAt: new Date().toISOString(),
     exp: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
@@ -153,7 +221,7 @@ export async function authenticateOwner(
 
   const newSession: DeviceSession = {
     id: `sess-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    userId: user.id,
+    userId: targetUser.id,
     token,
     deviceInfo: deviceInfo || parseDeviceName(userAgent),
     ipAddress: ipAddress || '127.0.0.1',
@@ -173,6 +241,19 @@ export async function authenticateOwner(
   store.sessions = activeSessions;
   writeStore(store);
 
+  // Record session in Supabase if reachable
+  try {
+    await prisma.session.create({
+      data: {
+        userId: targetUser.id,
+        token,
+        deviceInfo: newSession.deviceInfo,
+        ipAddress: newSession.ipAddress,
+        userAgent: newSession.userAgent,
+      },
+    });
+  } catch {}
+
   return { success: true, session: newSession };
 }
 
@@ -182,7 +263,7 @@ export async function authenticateOwner(
 export async function validateSession(token: string): Promise<{ valid: boolean; user?: OwnerUser; session?: DeviceSession }> {
   if (!token) return { valid: false };
 
-  // 1. Try stateless cryptographic JWT verification (Serverless-proof)
+  // 1. Stateless cryptographic JWT verification
   const decoded = verifySignedToken(token);
   if (decoded && decoded.userId) {
     const store = readStore();
@@ -206,7 +287,7 @@ export async function validateSession(token: string): Promise<{ valid: boolean; 
     return { valid: true, user, session };
   }
 
-  // 2. Fallback to stateful store lookup
+  // 2. Fallback to store lookup
   const store = readStore();
   const session = store.sessions.find((s) => s.token === token);
   if (session) {
@@ -256,6 +337,10 @@ export async function logoutSession(token: string): Promise<void> {
   const store = readStore();
   store.sessions = store.sessions.filter((s) => s.token !== token);
   writeStore(store);
+
+  try {
+    await prisma.session.deleteMany({ where: { token } });
+  } catch {}
 }
 
 /**
@@ -265,6 +350,10 @@ export async function logoutAllOtherSessions(currentToken: string): Promise<void
   const store = readStore();
   store.sessions = store.sessions.filter((s) => s.token === currentToken);
   writeStore(store);
+
+  try {
+    await prisma.session.deleteMany({ where: { token: { not: currentToken } } });
+  } catch {}
 }
 
 /**
@@ -293,7 +382,7 @@ export async function getActiveSessions(currentToken?: string): Promise<DeviceSe
 }
 
 /**
- * Update owner credentials
+ * Update owner credentials in Supabase PostgreSQL & Local Cache
  */
 export async function updateOwnerCredentials(
   currentPassword: string,
@@ -325,15 +414,19 @@ export async function updateOwnerCredentials(
     return { success: false, error: 'Current password is incorrect' };
   }
 
+  let finalUsername = user.username;
+  let finalEmail = user.email;
+  let finalPasswordHash = user.passwordHash;
+
   if (newUsername && newUsername.trim()) {
     if (newUsername.trim().length < 3) {
       return { success: false, error: 'Username must be at least 3 characters long' };
     }
-    user.username = newUsername.trim();
+    finalUsername = newUsername.trim();
   }
 
   if (newEmail !== undefined) {
-    user.email = newEmail ? newEmail.trim() : null;
+    finalEmail = newEmail ? newEmail.trim() : null;
   }
 
   if (newPassword && newPassword.trim()) {
@@ -341,12 +434,41 @@ export async function updateOwnerCredentials(
       return { success: false, error: 'New password must be at least 5 characters long' };
     }
     const salt = bcrypt.genSaltSync(10);
-    user.passwordHash = bcrypt.hashSync(newPassword.trim(), salt);
+    finalPasswordHash = bcrypt.hashSync(newPassword.trim(), salt);
   }
 
+  user.username = finalUsername;
+  user.email = finalEmail;
+  user.passwordHash = finalPasswordHash;
   user.updatedAt = new Date().toISOString();
   store.user = user;
   writeStore(store);
+
+  // Persist directly to Supabase PostgreSQL User table
+  try {
+    const existingDbUser = await prisma.user.findFirst();
+    if (existingDbUser) {
+      await prisma.user.update({
+        where: { id: existingDbUser.id },
+        data: {
+          username: finalUsername,
+          email: finalEmail,
+          passwordHash: finalPasswordHash,
+        },
+      });
+    } else {
+      await prisma.user.create({
+        data: {
+          username: finalUsername,
+          email: finalEmail,
+          passwordHash: finalPasswordHash,
+          name: user.name || 'Khata Owner',
+        },
+      });
+    }
+  } catch (err) {
+    console.warn('Supabase credential sync notice:', err);
+  }
 
   // Issue a fresh signed token with updated username/email
   const newToken = createSignedToken({
