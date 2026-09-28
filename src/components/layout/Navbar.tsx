@@ -3,9 +3,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, Bell, User, LogOut, Plus, CheckCircle, ShieldCheck, ChevronRight } from 'lucide-react';
+import { UserButton, useUser } from '@clerk/nextjs';
+import { Search, Bell, Plus, ChevronRight } from 'lucide-react';
 import { NotificationItem } from '@/lib/types';
-import { formatIndianDate, formatIndianTime } from '@/lib/formatters';
+import { formatIndianDate } from '@/lib/formatters';
 
 interface NavbarProps {
   onAddCustomerClick?: () => void;
@@ -14,6 +15,7 @@ interface NavbarProps {
 
 export function Navbar({ onAddCustomerClick }: NavbarProps) {
   const router = useRouter();
+  const { isSignedIn, isLoaded } = useUser();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -22,23 +24,12 @@ export function Navbar({ onAddCustomerClick }: NavbarProps) {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifsDropdown, setShowNotifsDropdown] = useState(false);
-  
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [currentUser, setCurrentUser] = useState<any>(null);
 
   const searchRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
-  const profileRef = useRef<HTMLDivElement>(null);
 
-  // Load user and notifications
+  // Load notifications
   useEffect(() => {
-    fetch('/api/auth/me')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.user) setCurrentUser(data.user);
-      })
-      .catch(() => {});
-
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000);
     return () => clearInterval(interval);
@@ -64,9 +55,6 @@ export function Navbar({ onAddCustomerClick }: NavbarProps) {
       }
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
         setShowNotifsDropdown(false);
-      }
-      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
-        setShowProfileMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -94,12 +82,6 @@ export function Navbar({ onAddCustomerClick }: NavbarProps) {
 
     return () => clearTimeout(timer);
   }, [searchQuery]);
-
-  const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
-    router.refresh();
-  };
 
   const markAllNotifsRead = async () => {
     await fetch('/api/notifications', {
@@ -268,48 +250,23 @@ export function Navbar({ onAddCustomerClick }: NavbarProps) {
           )}
         </div>
 
-        {/* Profile Menu */}
-        <div ref={profileRef} className="relative">
-          <button
-            onClick={() => setShowProfileMenu(!showProfileMenu)}
-            className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-1.5 rounded-xl hover:bg-slate-100 transition border border-slate-200/60"
+        {/* Clerk User Button */}
+        {isLoaded && isSignedIn ? (
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: 'w-8 h-8 rounded-xl',
+              },
+            }}
+          />
+        ) : (
+          <Link
+            href="/sign-in"
+            className="px-3.5 py-1.5 bg-[#EB5E28] hover:bg-[#d64f1d] text-white text-xs font-bold rounded-xl shadow-sm transition"
           >
-            <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
-              {currentUser?.name ? currentUser.name[0].toUpperCase() : 'A'}
-            </div>
-            <span className="text-xs font-bold text-slate-800 hidden sm:block">
-              {currentUser?.username || 'Owner'}
-            </span>
-          </button>
-
-          {showProfileMenu && (
-            <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in fade-in-50 zoom-in-95">
-              <div className="p-3.5 border-b border-slate-100 bg-slate-50/50">
-                <div className="font-bold text-xs text-slate-900">{currentUser?.name || 'Khata Owner'}</div>
-                <div className="text-[11px] text-slate-500">@{currentUser?.username || 'owner'}</div>
-                <div className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
-                  <ShieldCheck className="w-3 h-3" /> Single Owner Account
-                </div>
-              </div>
-
-              <div className="p-1.5">
-                <Link
-                  href="/settings"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-lg flex items-center gap-2 transition"
-                >
-                  <User className="w-4 h-4 text-slate-400" /> Account Settings
-                </Link>
-                <button
-                  onClick={handleLogout}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-lg flex items-center gap-2 transition"
-                >
-                  <LogOut className="w-4 h-4 text-rose-500" /> Logout
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+            Sign In
+          </Link>
+        )}
       </div>
     </header>
   );

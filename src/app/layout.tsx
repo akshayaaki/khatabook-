@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { ClerkProvider } from '@clerk/nextjs';
 import './globals.css';
 import { ToastProvider } from '@/components/ui/Toast';
 
@@ -25,10 +26,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="bg-slate-50">
-      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased selection:bg-[#EB5E28] selection:text-white">
-        <ToastProvider>{children}</ToastProvider>
-      </body>
-    </html>
+    <ClerkProvider
+      appearance={{
+        variables: {
+          colorPrimary: '#EB5E28',
+          borderRadius: '0.75rem',
+        },
+      }}
+    >
+      <html lang="en" className="bg-slate-50">
+        <body className="min-h-screen bg-slate-50 text-slate-900 antialiased selection:bg-[#EB5E28] selection:text-white">
+          <ToastProvider>{children}</ToastProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
