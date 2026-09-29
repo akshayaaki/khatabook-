@@ -35,6 +35,8 @@ function SignInContent() {
         return 'Sign-in popup was closed before completing.';
       case 'auth/popup-blocked':
         return 'Popup was blocked by your browser. Please allow popups for this site.';
+      case 'auth/unauthorized-domain':
+        return 'This domain is not authorized in Firebase Console. Please add your domain (e.g. localhost) to Firebase Authentication Authorized Domains.';
       case 'auth/network-request-failed':
         return 'Network connection failed. Please check your internet connection.';
       default:

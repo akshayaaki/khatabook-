@@ -30,6 +30,8 @@ export default function SignUpPage() {
         return 'Password must be at least 6 characters long.';
       case 'auth/popup-closed-by-user':
         return 'Sign-up popup was closed before completing.';
+      case 'auth/unauthorized-domain':
+        return 'This domain is not authorized in Firebase Console. Please add your domain (e.g. localhost) to Firebase Authentication Authorized Domains.';
       default:
         return err?.message || 'Failed to create account. Please try again.';
     }
