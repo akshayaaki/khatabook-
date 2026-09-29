@@ -1,11 +1,11 @@
 import { redirect } from 'next/navigation';
-import { auth } from '@clerk/nextjs/server';
+import { getCurrentUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const { userId } = await auth();
-  if (userId) {
+  const { user } = await getCurrentUser();
+  if (user) {
     redirect('/dashboard');
   } else {
     redirect('/sign-in');

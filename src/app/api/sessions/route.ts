@@ -17,5 +17,5 @@ export async function GET() {
 }
 
 export async function DELETE() {
-  return NextResponse.json({ success: true, message: 'Sessions are managed via Clerk account settings' });
+  return NextResponse.json({ success: true, message: 'Sessions are managed via Firebase authentication' });
 }
